@@ -1,0 +1,56 @@
+config {
+  type: "incremental",
+  schema: dataform.projectConfig.vars.silver_dataset,
+  name: "stg_ebs_hz_cust_accounts",
+  description: "Deduplicated and standardized Oracle EBS Customer Accounts in Silver 1 dataset.",
+  uniqueKey: ["cust_account_id"],
+  bigquery: {
+    clusterBy: ["cust_account_id"]
+  },
+  assertions: {
+    uniqueKey: ["cust_account_id"],
+    nonNull: ["cust_account_id", "account_number"]
+  },
+  columns: {
+    cust_account_id: "Primary Key - Customer Account Identifier",
+    account_number: "Oracle Customer Account Number",
+    account_name: "Customer Account Name",
+    status: "Account Status (A = Active, I = Inactive)",
+    creation_date: "Record creation timestamp in EBS",
+    last_update_date: "Last update timestamp in EBS",
+    silver1_ingestion_timestamp: "Timestamp when record was materialized into Silver 1"
+  }
+}
+
+WITH raw_cust AS (
+  SELECT
+    CAST(CUST_ACCOUNT_ID AS INT64) AS cust_account_id,
+    CAST(ACCOUNT_NUMBER AS STRING) AS account_number,
+    CAST(ACCOUNT_NAME AS STRING) AS account_name,
+    CAST(STATUS AS STRING) AS status,
+    CAST(CREATION_DATE AS TIMESTAMP) AS creation_date,
+    CAST(LAST_UPDATE_DATE AS TIMESTAMP) AS last_update_date,
+    CAST(_FIVETRAN_DELETED AS BOOL) AS is_deleted,
+    CAST(_FIVETRAN_SYNCED AS TIMESTAMP) AS cdc_synced_at,
+    ROW_NUMBER() OVER (
+      PARTITION BY CUST_ACCOUNT_ID 
+      ORDER BY LAST_UPDATE_DATE DESC, _FIVETRAN_SYNCED DESC
+    ) AS row_num
+  FROM
+    ${ref("HZ_CUST_ACCOUNTS")}
+  ${when(incremental(), `WHERE LAST_UPDATE_DATE >= (SELECT IFNULL(MAX(last_update_date), TIMESTAMP('1970-01-01')) FROM ${self()})`)}
+)
+
+SELECT
+  cust_account_id,
+  account_number,
+  account_name,
+  status,
+  creation_date,
+  last_update_date,
+  CURRENT_TIMESTAMP() AS silver1_ingestion_timestamp
+FROM
+  raw_cust
+WHERE
+  row_num = 1
+  AND (is_deleted IS FALSE OR is_deleted IS NULL)

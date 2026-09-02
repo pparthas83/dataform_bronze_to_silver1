@@ -1,0 +1,10 @@
+# Dataform Core Workflow Settings
+defaultProject: YOUR_GCP_PROJECT_ID
+defaultLocation: US
+defaultDataset: oracle_ebs_silver1
+defaultAssertionDataset: oracle_ebs_assertions
+dataformCoreVersion: 3.0.0
+
+vars:
+  bronze_dataset: oracle_ebs_bronze
+  silver_dataset: oracle_ebs_silver1

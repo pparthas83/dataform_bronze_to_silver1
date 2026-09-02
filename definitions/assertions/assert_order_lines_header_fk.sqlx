@@ -1,0 +1,18 @@
+config {
+  type: "assertion",
+  schema: dataform.projectConfig.defaultAssertionDataset,
+  name: "assert_order_lines_header_fk",
+  description: "Assertion failure if any order line in stg_ebs_oe_order_lines references a header_id that does not exist in stg_ebs_oe_order_headers"
+}
+
+SELECT
+  l.line_id,
+  l.header_id
+FROM
+  ${ref("stg_ebs_oe_order_lines")} l
+LEFT JOIN
+  ${ref("stg_ebs_oe_order_headers")} h
+ON
+  l.header_id = h.header_id
+WHERE
+  h.header_id IS NULL

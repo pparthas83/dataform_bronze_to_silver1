@@ -1,0 +1,4 @@
+node_modules/
+.df-credentials.json
+package-lock.json
+.dataform/
