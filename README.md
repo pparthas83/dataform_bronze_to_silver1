@@ -6,13 +6,33 @@ This repository contains a production-ready **Google Cloud Dataform (Core v3+)**
 
 ## How It Works
 
-The automated pipeline operates across 8 distinct sequential stages managed end-to-end by Cloud Composer and Dataform:
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Sch as Cloud Composer (Airflow)
+    participant BQ as BigQuery (Bronze)
+    participant DF as GCP Dataform Service
+    participant Target as BigQuery (Silver 1 & Assertions)
+    participant Alert as Alert System (Slack/Email)
 
+    Sch->>Sch: 1. Timer / Event triggers DAG execution
+    Sch->>BQ: 2. Sensor checks if raw Bronze CDC data arrived
+    BQ-->>Sch: Bronze data ready
+    Sch->>DF: 3. Call API to Compile latest GitHub 'main' branch
+    DF-->>Sch: Compilation Success (0 graph errors)
+    Sch->>DF: 4. Invoke Workflow Execution
+    DF->>Target: 5. Execute Incremental MERGE (Headers, Lines, Customers)
+    DF->>Target: 6. Run 7 Data Quality Assertions
+    Target-->>DF: Execution & Assertions complete
+    DF-->>Sch: Return Status: SUCCEEDED
+    alt On Failure
+        Sch->>Alert: Send Slack/Email Alert with failure logs
+    else On Success
+        Sch->>Sch: 7. Log metrics & trigger downstream Gold Layer/Looker
+    end
 ```
-[1. Trigger & Schedule] ➔ [2. Data Readiness Check] ➔ [3. Dataform Compilation] ➔ [4. Incremental MERGE Execution]
-                                                                                            │
-[8. Downstream Integration]  [7. Error Handling / Alerts]  [6. Status Polling]  [5. Quality Assertions]
-```
+
+The automated pipeline operates across 8 distinct sequential stages managed end-to-end by Cloud Composer and Dataform:
 
 ### Step 1: Trigger & Schedule
 - **Automated Scheduling**: Cloud Composer (Airflow DAG `ebs_bronze_to_silver1_pipeline`) initiates execution automatically based on a cron schedule (e.g., hourly at minute 0: `0 * * * *`).
