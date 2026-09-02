@@ -15,9 +15,9 @@ from google.cloud.airflow.operators.dataform import (
 )
 
 # -----------------------------------------------------------------------------
-# Configuration Variables (Update for your target GCP Environment)
+# Configuration Variables for Target GCP Project
 # -----------------------------------------------------------------------------
-GCP_PROJECT_ID = "YOUR_GCP_PROJECT_ID"
+GCP_PROJECT_ID = "pradeep-demo-1"
 GCP_REGION = "us-central1"
 DATAFORM_REPOSITORY_ID = "coned_dataform_bronze_to_silver1"
 

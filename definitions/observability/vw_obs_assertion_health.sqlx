@@ -1,0 +1,17 @@
+config {
+  type: "view",
+  schema: dataform.projectConfig.vars.silver_dataset,
+  name: "vw_obs_assertion_health",
+  description: "Observability View for Looker Studio Card 2: Data Quality Assertion Health & Failing Row Counts.",
+  tags: ["observability"],
+  dependencies: ["stg_ebs_oe_order_headers", "stg_ebs_oe_order_lines", "stg_ebs_hz_cust_accounts"]
+}
+
+SELECT
+  'assert_order_lines_header_fk' AS assertion_name,
+  'Referential Integrity FK Check' AS assertion_type,
+  COUNT(1) AS failing_row_count,
+  CASE WHEN COUNT(1) = 0 THEN 'PASSING' ELSE 'CRITICAL FAILURE' END AS status,
+  CURRENT_TIMESTAMP() AS last_evaluated_at
+FROM
+  ${ref("assert_order_lines_header_fk")}

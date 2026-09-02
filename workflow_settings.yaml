@@ -1,5 +1,5 @@
 # Dataform Core Workflow Settings
-defaultProject: YOUR_GCP_PROJECT_ID
+defaultProject: pradeep-demo-1
 defaultLocation: US
 defaultDataset: oracle_ebs_silver1
 defaultAssertionDataset: oracle_ebs_assertions

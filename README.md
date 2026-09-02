@@ -4,6 +4,20 @@ This repository contains a production-ready **Google Cloud Dataform (Core v3+)**
 
 ---
 
+## GCP Configuration
+
+| Setting | Value |
+| :--- | :--- |
+| **GCP Project ID** | `pradeep-demo-1` |
+| **GCP Account** | `admin@pradeepsarathy.altostrat.com` |
+| **BigQuery Location** | `US` |
+| **Bronze Dataset** | `oracle_ebs_bronze` |
+| **Silver 1 Dataset** | `oracle_ebs_silver1` |
+| **Assertion Dataset** | `oracle_ebs_assertions` |
+| **Dataform Core Version** | `3.0.0` |
+
+---
+
 ## How It Works
 
 ```mermaid
@@ -70,7 +84,7 @@ Immediately after table materializations finish, Dataform executes **7 automated
   - If retries fail, Composer sends immediate alert notifications (Email, Slack, or PagerDuty) with error stack traces and BigQuery execution IDs.
 
 ### Step 8: Downstream Integration
-- Upon successful execution (`SUCCEEDED`), Composer logs pipeline performance metrics (duration, rows processed) and triggers downstream analytical processes (e.g., Gold layer aggregation, ML model feature pipelines, or Looker dashboard cache updates).
+- Upon successful execution (`SUCCEEDED`), Composer logs pipeline performance metrics (duration, rows processed) and triggers downstream analytical processes (e.g., Gold layer aggregation, ML model feature pipelines, or Looker Studio dashboard cache updates).
 
 ---
 
@@ -78,52 +92,119 @@ Immediately after table materializations finish, Dataform executes **7 automated
 
 ```
 .
-├── workflow_settings.yaml         # Dataform Core v3+ project configuration
-├── README.md                      # Pipeline documentation & architecture guide
+├── workflow_settings.yaml              # Dataform Core v3+ project configuration (pradeep-demo-1)
+├── README.md                           # Pipeline documentation & architecture guide
 ├── definitions/
-│   ├── sources/                   # Bronze layer table declarations
+│   ├── sources/                        # Bronze layer table declarations
 │   │   ├── src_oe_order_headers_all.sqlx
 │   │   ├── src_oe_order_lines_all.sqlx
 │   │   └── src_hz_cust_accounts.sqlx
-│   ├── silver1/                   # Silver 1 incremental transformations
+│   ├── silver1/                        # Silver 1 incremental transformations
 │   │   ├── stg_ebs_oe_order_headers.sqlx
 │   │   ├── stg_ebs_oe_order_lines.sqlx
 │   │   └── stg_ebs_hz_cust_accounts.sqlx
-│   └── assertions/                # Custom Data Quality assertions
-│       └── assert_order_lines_header_fk.sqlx
-├── dags/                          # Cloud Composer (Airflow) automation DAGs
+│   ├── assertions/                     # Custom Data Quality assertions
+│   │   └── assert_order_lines_header_fk.sqlx
+│   └── observability/                  # Looker Studio observability views
+│       ├── vw_obs_pipeline_status.sqlx
+│       ├── vw_obs_assertion_health.sqlx
+│       └── vw_obs_ingestion_volume.sqlx
+├── dags/                               # Cloud Composer (Airflow) automation DAGs
 │   └── ebs_bronze_to_silver1_pipeline.py
-└── scripts/                       # Test seed scripts for local validation
+└── scripts/                            # Test seed scripts for local validation
     └── seed_bronze_tables.sql
+```
+
+---
+
+## Observability: Day 1 Looker Studio Dashboard
+
+The pipeline includes **3 pre-built BigQuery Views** in `oracle_ebs_silver1` that directly power a Day 1 Looker Studio observability dashboard:
+
+### Dashboard Cards & Backing Views
+
+| Dashboard Card | BigQuery View | What It Measures |
+| :--- | :--- | :--- |
+| **Card 1: Pipeline Status** | `vw_obs_pipeline_status` | Job durations, state (SUCCESS/FAILED), GB billed, slot usage from `INFORMATION_SCHEMA.JOBS`. |
+| **Card 2: Assertion Health** | `vw_obs_assertion_health` | Count of failing rows per assertion, PASSING/CRITICAL FAILURE status labels. |
+| **Card 4: Ingestion Volume** | `vw_obs_ingestion_volume` | Daily record count ingested per Silver 1 table via `silver1_ingestion_timestamp`. |
+
+### Setting Up Looker Studio
+
+1. Go to [Looker Studio](https://lookerstudio.google.com) and click **Create > Report**.
+2. Add a **BigQuery** connector using project `pradeep-demo-1`, dataset `oracle_ebs_silver1`.
+3. Connect each view as a separate data source:
+   - `vw_obs_pipeline_status` → Card 1 (Scorecard + Table)
+   - `vw_obs_assertion_health` → Card 2 (Scorecard + Status Chip)
+   - `vw_obs_ingestion_volume` → Card 4 (Time Series Line Chart)
+4. Set auto-refresh interval to **15 minutes**.
+
+### Day 1 Alert Configuration
+
+| Alert | Severity | Trigger Condition | Channel |
+| :--- | :---: | :--- | :--- |
+| **Pipeline Hard Failure** | SEV-1 🔴 | Airflow DAG status = `FAILED` after 1 retry | Slack `#data-pipeline-alerts` |
+| **Assertion Failure** | SEV-1 🔴 | `vw_obs_assertion_health.failing_row_count > 0` | Slack `#data-pipeline-alerts` |
+| **Ingestion Volume Delay** | SEV-2 🟡 | Bronze sensor timeout after 30 mins | Slack `#data-pipeline-alerts` |
+
+---
+
+## Cloud Deployment
+
+### Prerequisites
+- GCP Project `pradeep-demo-1` with BigQuery, Dataform, and Cloud Composer APIs enabled.
+- Service Account with roles: `roles/dataform.editor`, `roles/bigquery.dataEditor`, `roles/bigquery.jobUser`.
+
+### Step 1: Seed Bronze Tables (One-Time Setup)
+```bash
+bq query --project_id=pradeep-demo-1 --use_legacy_sql=false < scripts/seed_bronze_tables.sql
+```
+
+### Step 2: Connect Dataform Repository
+1. Open **BigQuery > Dataform** in Google Cloud Console.
+2. Click **Create Repository** and connect to GitHub repo `pparthas83/coned_dataform_bronze_to_silver1` on branch `main`.
+
+### Step 3: Deploy Cloud Composer DAG
+```bash
+gcloud composer environments storage dags import \
+  --environment YOUR_COMPOSER_ENV_NAME \
+  --location us-central1 \
+  --source dags/ebs_bronze_to_silver1_pipeline.py
+```
+
+### Step 4: Initial Full Refresh Run
+```bash
+npx -y @dataform/cli run --full-refresh --default-project=pradeep-demo-1
+```
+
+### Step 5: Verify Output
+```bash
+# Verify Silver 1 tables were created
+bq ls --project_id=pradeep-demo-1 oracle_ebs_silver1
+
+# Verify assertions passed (should return 0 rows)
+bq query --project_id=pradeep-demo-1 --use_legacy_sql=false \
+  "SELECT * FROM oracle_ebs_assertions.assert_order_lines_header_fk"
 ```
 
 ---
 
 ## Local Development & Compilation
 
-### 1. Prerequisites
-- Node.js (v18+)
-- `@dataform/cli` (v3.0.0+)
-
-### 2. Compile Project
-To compile the Dataform project locally and verify the graph:
+### Compile Project
 ```bash
 npx -y @dataform/cli compile
 ```
 
-### 3. Seed Mock Bronze Data (Optional Testing)
-Execute the seed script in your BigQuery console to populate sample Bronze CDC data (including initial inserts, updates, and soft deletes):
-```bash
-bq query --use_legacy_sql=false < scripts/seed_bronze_tables.sql
+Expected output:
 ```
-
----
-
-## Cloud Composer Deployment
-
-1. Copy [dags/ebs_bronze_to_silver1_pipeline.py](file:///usr/local/google/home/pradeepsarathy/AntiGravity_Projects/Project_3/coned_dataform_bronze_to_silver1/dags/ebs_bronze_to_silver1_pipeline.py) to your Cloud Composer environment's `dags/` bucket.
-2. Ensure the Cloud Composer Service Account has the following IAM roles:
-   - `Dataform Editor`
-   - `BigQuery Data Editor`
-   - `BigQuery Job User`
-3. Update `GCP_PROJECT_ID` in `workflow_settings.yaml` and `ebs_bronze_to_silver1_pipeline.py`.
+Compiled 13 action(s).
+6 dataset(s):
+  oracle_ebs_silver1.vw_obs_assertion_health [view]
+  oracle_ebs_silver1.vw_obs_ingestion_volume [view]
+  oracle_ebs_silver1.vw_obs_pipeline_status [view]
+  oracle_ebs_silver1.stg_ebs_hz_cust_accounts [incremental]
+  oracle_ebs_silver1.stg_ebs_oe_order_headers [incremental]
+  oracle_ebs_silver1.stg_ebs_oe_order_lines [incremental]
+7 assertion(s): ...
+```
