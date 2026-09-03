@@ -2,3 +2,5 @@ node_modules/
 .df-credentials.json
 package-lock.json
 .dataform/
+__pycache__/
+*.py[cod]
