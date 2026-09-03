@@ -162,7 +162,7 @@ bq query --project_id=YOUR_GCP_PROJECT_ID --use_legacy_sql=false < scripts/seed_
 
 ### Step 2: Connect Dataform Repository
 1. Open **BigQuery > Dataform** in Google Cloud Console.
-2. Click **Create Repository** and connect to your GitHub repo (e.g. `YOUR_GITHUB_ORG/ebs_dataform_bronze_to_silver1`) on branch `main`.
+2. Click **Create Repository** and connect to your GitHub repo `pparthas83/dataform_bronze_to_silver1` on branch `main`.
 
 ### Step 3: Deploy Cloud Composer DAG
 ```bash

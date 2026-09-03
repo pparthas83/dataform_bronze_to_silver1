@@ -20,7 +20,7 @@ from google.cloud.airflow.operators.dataform import (
 # -----------------------------------------------------------------------------
 GCP_PROJECT_ID = Variable.get("GCP_PROJECT_ID", default_var="YOUR_GCP_PROJECT_ID")
 GCP_REGION = Variable.get("GCP_REGION", default_var="us-central1")
-DATAFORM_REPOSITORY_ID = Variable.get("DATAFORM_REPOSITORY_ID", default_var="ebs_dataform_bronze_to_silver1")
+DATAFORM_REPOSITORY_ID = Variable.get("DATAFORM_REPOSITORY_ID", default_var="dataform_bronze_to_silver1")
 
 DEFAULT_ARGS = {
     "owner": "data-engineering",
