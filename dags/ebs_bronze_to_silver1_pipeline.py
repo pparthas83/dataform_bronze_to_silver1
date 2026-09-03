@@ -9,17 +9,18 @@ Orchestrates:
 
 from datetime import datetime, timedelta
 from airflow import DAG
+from airflow.models import Variable
 from google.cloud.airflow.operators.dataform import (
     DataformCreateCompilationResultOperator,
     DataformCreateWorkflowInvocationOperator,
 )
 
 # -----------------------------------------------------------------------------
-# Configuration Variables for Target GCP Project
+# Configuration Variables (Configured via Airflow Variables or Environment)
 # -----------------------------------------------------------------------------
-GCP_PROJECT_ID = "pradeep-demo-1"
-GCP_REGION = "us-central1"
-DATAFORM_REPOSITORY_ID = "coned_dataform_bronze_to_silver1"
+GCP_PROJECT_ID = Variable.get("GCP_PROJECT_ID", default_var="YOUR_GCP_PROJECT_ID")
+GCP_REGION = Variable.get("GCP_REGION", default_var="us-central1")
+DATAFORM_REPOSITORY_ID = Variable.get("DATAFORM_REPOSITORY_ID", default_var="ebs_dataform_bronze_to_silver1")
 
 DEFAULT_ARGS = {
     "owner": "data-engineering",

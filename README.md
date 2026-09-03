@@ -8,8 +8,8 @@ This repository contains a production-ready **Google Cloud Dataform (Core v3+)**
 
 | Setting | Value |
 | :--- | :--- |
-| **GCP Project ID** | `pradeep-demo-1` |
-| **GCP Account** | `admin@pradeepsarathy.altostrat.com` |
+| **GCP Project ID** | `YOUR_GCP_PROJECT_ID` |
+| **GCP Account** | `your-service-account@YOUR_GCP_PROJECT_ID.iam.gserviceaccount.com` |
 | **BigQuery Location** | `US` |
 | **Bronze Dataset** | `oracle_ebs_bronze` |
 | **Silver 1 Dataset** | `oracle_ebs_silver1` |
@@ -92,7 +92,7 @@ Immediately after table materializations finish, Dataform executes **7 automated
 
 ```
 .
-├── workflow_settings.yaml              # Dataform Core v3+ project configuration (pradeep-demo-1)
+├── workflow_settings.yaml              # Dataform Core v3+ project configuration
 ├── README.md                           # Pipeline documentation & architecture guide
 ├── definitions/
 │   ├── sources/                        # Bronze layer table declarations
@@ -132,7 +132,7 @@ The pipeline includes **3 pre-built BigQuery Views** in `oracle_ebs_silver1` tha
 ### Setting Up Looker Studio
 
 1. Go to [Looker Studio](https://lookerstudio.google.com) and click **Create > Report**.
-2. Add a **BigQuery** connector using project `pradeep-demo-1`, dataset `oracle_ebs_silver1`.
+2. Add a **BigQuery** connector using project `YOUR_GCP_PROJECT_ID`, dataset `oracle_ebs_silver1`.
 3. Connect each view as a separate data source:
    - `vw_obs_pipeline_status` → Card 1 (Scorecard + Table)
    - `vw_obs_assertion_health` → Card 2 (Scorecard + Status Chip)
@@ -152,17 +152,17 @@ The pipeline includes **3 pre-built BigQuery Views** in `oracle_ebs_silver1` tha
 ## Cloud Deployment
 
 ### Prerequisites
-- GCP Project `pradeep-demo-1` with BigQuery, Dataform, and Cloud Composer APIs enabled.
+- GCP Project `YOUR_GCP_PROJECT_ID` with BigQuery, Dataform, and Cloud Composer APIs enabled.
 - Service Account with roles: `roles/dataform.editor`, `roles/bigquery.dataEditor`, `roles/bigquery.jobUser`.
 
 ### Step 1: Seed Bronze Tables (One-Time Setup)
 ```bash
-bq query --project_id=pradeep-demo-1 --use_legacy_sql=false < scripts/seed_bronze_tables.sql
+bq query --project_id=YOUR_GCP_PROJECT_ID --use_legacy_sql=false < scripts/seed_bronze_tables.sql
 ```
 
 ### Step 2: Connect Dataform Repository
 1. Open **BigQuery > Dataform** in Google Cloud Console.
-2. Click **Create Repository** and connect to GitHub repo `pparthas83/coned_dataform_bronze_to_silver1` on branch `main`.
+2. Click **Create Repository** and connect to your GitHub repo (e.g. `YOUR_GITHUB_ORG/ebs_dataform_bronze_to_silver1`) on branch `main`.
 
 ### Step 3: Deploy Cloud Composer DAG
 ```bash
@@ -174,16 +174,16 @@ gcloud composer environments storage dags import \
 
 ### Step 4: Initial Full Refresh Run
 ```bash
-npx -y @dataform/cli run --full-refresh --default-project=pradeep-demo-1
+npx -y @dataform/cli run --full-refresh --default-project=YOUR_GCP_PROJECT_ID
 ```
 
 ### Step 5: Verify Output
 ```bash
 # Verify Silver 1 tables were created
-bq ls --project_id=pradeep-demo-1 oracle_ebs_silver1
+bq ls --project_id=YOUR_GCP_PROJECT_ID oracle_ebs_silver1
 
 # Verify assertions passed (should return 0 rows)
-bq query --project_id=pradeep-demo-1 --use_legacy_sql=false \
+bq query --project_id=YOUR_GCP_PROJECT_ID --use_legacy_sql=false \
   "SELECT * FROM oracle_ebs_assertions.assert_order_lines_header_fk"
 ```
 
