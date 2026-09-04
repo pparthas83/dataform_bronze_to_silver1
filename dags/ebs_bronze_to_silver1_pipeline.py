@@ -1,10 +1,11 @@
 """
-Cloud Composer (Apache Airflow) DAG to Automate Dataform Bronze to Silver 1 Pipeline.
+Cloud Composer (Apache Airflow) DAG to Automate Hourly Dataform Bronze to Silver 1 Pipeline.
 
-Orchestrates:
-1. Dataform repository compilation via Dataform API.
-2. Incremental MERGE execution of Oracle EBS Silver 1 tables in BigQuery.
-3. Execution of 7 automated Data Quality & Referential Integrity Assertions.
+Architecture Pattern:
+1. Oracle GoldenGate continuously streams CDC changes in real time to BigQuery Bronze (oracle_ebs_bronze).
+2. Every one hour, this Airflow DAG triggers on schedule ('0 * * * *') to invoke Dataform.
+3. Dataform executes incremental deduplication and atomic MERGE into Silver 1 (oracle_ebs_silver1) with a 2-hour safety lookback buffer.
+4. Dataform automatically validates 7 Data Quality & Referential Integrity Assertions.
 """
 
 from datetime import datetime, timedelta
@@ -38,10 +39,11 @@ DEFAULT_ARGS = {
 with DAG(
     dag_id="ebs_bronze_to_silver1_pipeline",
     default_args=DEFAULT_ARGS,
-    description="Automated Dataform Bronze to Silver 1 transformation for Oracle EBS OM data",
+    description="Hourly automated Dataform Bronze to Silver 1 incremental pipeline for Oracle EBS",
     schedule_interval="0 * * * *",  # Runs hourly at minute 0
     catchup=False,
-    tags=["dataform", "oracle_ebs", "bronze_to_silver1", "order_management"],
+    max_active_runs=1,  # Concurrency guard: prevents overlapping hourly runs
+    tags=["dataform", "oracle_ebs", "golden_gate", "bronze_to_silver1", "hourly"],
 ) as dag:
 
     # Task 1: Compile Dataform repository from latest 'main' branch

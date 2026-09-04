@@ -57,7 +57,8 @@ WITH raw_lines AS (
     ) AS row_num
   FROM
     ${ref("OE_ORDER_LINES_ALL")}
-  ${when(incremental(), `WHERE LAST_UPDATE_DATE >= (SELECT IFNULL(MAX(last_update_date), TIMESTAMP('1970-01-01')) FROM ${self()})`)}
+  -- Incremental filter with 2-hour safety lookback to capture late-arriving CDC records:
+  ${when(incremental(), `WHERE LAST_UPDATE_DATE >= (SELECT TIMESTAMP_SUB(IFNULL(MAX(last_update_date), TIMESTAMP('1970-01-01')), INTERVAL 2 HOUR) FROM ${self()})`)}
 )
 
 SELECT
