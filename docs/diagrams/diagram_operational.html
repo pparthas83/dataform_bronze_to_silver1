@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Operational Architecture: Hourly GoldenGate to Dataform Pipeline</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+</head>
+<body class="bg-transparent text-[var(--foreground)] antialiased p-4 sm:p-6 font-sans">
+  <div class="max-w-5xl mx-auto bg-[var(--card)] border border-[var(--border)] rounded-2xl p-6 sm:p-8 shadow-sm space-y-6">
+
+    <!-- Header -->
+    <div class="border-b border-[var(--border)] pb-4 flex items-center justify-between">
+      <div>
+        <div class="flex items-center gap-2">
+          <span class="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-500 font-bold text-sm">⚙️</span>
+          <h1 class="text-lg sm:text-xl font-bold tracking-tight text-[var(--foreground)]">Operational Architecture &amp; Technical Specs</h1>
+        </div>
+        <p class="text-xs sm:text-sm text-[var(--muted-foreground)] mt-1">
+          Technical specifications for GoldenGate real-time stream, Airflow hourly orchestration, and Dataform lookback MERGE
+        </p>
+      </div>
+      <span class="text-[10px] uppercase tracking-wider font-semibold px-2.5 py-1 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+        Operational View
+      </span>
+    </div>
+
+    <!-- Technical Specification Cards -->
+    <div class="space-y-4">
+
+      <!-- Stage 1: Ingestion & Storage Specs -->
+      <div class="p-4 rounded-xl bg-[var(--content)] border border-[var(--border)] space-y-3">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="w-5 h-5 rounded-full bg-orange-500/20 text-orange-600 dark:text-orange-400 flex items-center justify-center text-xs font-bold">1</span>
+            <h2 class="text-xs sm:text-sm font-bold text-[var(--foreground)]">GoldenGate Real-Time Ingestion Tier</h2>
+          </div>
+          <span class="text-[10px] font-mono text-[var(--muted-foreground)]">Oracle ➔ BigQuery Bronze</span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+          <div class="p-3 rounded-lg bg-[var(--card)] border border-[var(--border)] space-y-1">
+            <span class="text-[10px] uppercase text-[var(--muted-foreground)] font-semibold">Replication Mode</span>
+            <p class="font-mono text-emerald-600 dark:text-emerald-400 font-medium">Append-Only Streaming</p>
+            <p class="text-[11px] text-[var(--muted-foreground)]">Inserts all CDC operations without costly row-by-row merges in Bronze</p>
+          </div>
+          <div class="p-3 rounded-lg bg-[var(--card)] border border-[var(--border)] space-y-1">
+            <span class="text-[10px] uppercase text-[var(--muted-foreground)] font-semibold">CDC Tracking Headers</span>
+            <p class="font-mono text-blue-600 dark:text-blue-400 font-medium">OGG_OP_TYPE, OGG_OP_TS</p>
+            <p class="text-[11px] text-[var(--muted-foreground)]">Includes EBS <code>LAST_UPDATE_DATE</code> transaction timestamp</p>
+          </div>
+          <div class="p-3 rounded-lg bg-[var(--card)] border border-[var(--border)] space-y-1">
+            <span class="text-[10px] uppercase text-[var(--muted-foreground)] font-semibold">Target Dataset</span>
+            <p class="font-mono text-amber-600 dark:text-amber-400 font-medium">oracle_ebs_bronze</p>
+            <p class="text-[11px] text-[var(--muted-foreground)]">OE_ORDER_HEADERS_ALL, OE_ORDER_LINES_ALL, HZ_CUST_ACCOUNTS</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stage 2: Airflow Hourly Orchestration -->
+      <div class="p-4 rounded-xl bg-[var(--content)] border border-[var(--border)] space-y-3">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="w-5 h-5 rounded-full bg-blue-500/20 text-blue-600 dark:text-blue-400 flex items-center justify-center text-xs font-bold">2</span>
+            <h2 class="text-xs sm:text-sm font-bold text-[var(--foreground)]">Cloud Composer (Airflow) Hourly DAG</h2>
+          </div>
+          <span class="text-[10px] font-mono text-[var(--muted-foreground)]">ebs_bronze_to_silver1_pipeline</span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+          <div class="p-3 rounded-lg bg-[var(--card)] border border-[var(--border)] space-y-1">
+            <span class="text-[10px] uppercase text-[var(--muted-foreground)] font-semibold">Schedule Interval</span>
+            <p class="font-mono text-blue-500 font-medium">0 * * * * (Hourly)</p>
+            <p class="text-[11px] text-[var(--muted-foreground)]">Triggers at minute 00; <code>catchup=False</code></p>
+          </div>
+          <div class="p-3 rounded-lg bg-[var(--card)] border border-[var(--border)] space-y-1">
+            <span class="text-[10px] uppercase text-[var(--muted-foreground)] font-semibold">Concurrency Guard</span>
+            <p class="font-mono text-emerald-500 font-bold">max_active_runs=1</p>
+            <p class="text-[11px] text-[var(--muted-foreground)]">Guarantees subsequent hourly runs never overlap</p>
+          </div>
+          <div class="p-3 rounded-lg bg-[var(--card)] border border-[var(--border)] space-y-1">
+            <span class="text-[10px] uppercase text-[var(--muted-foreground)] font-semibold">Orchestration Tasks</span>
+            <p class="font-mono text-purple-500 font-medium">2 Native Operators</p>
+            <p class="text-[11px] text-[var(--muted-foreground)]">DataformCreateCompilationResult ➔ WorkflowInvocation</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stage 3: Dataform Transformation Engine -->
+      <div class="p-4 rounded-xl bg-[var(--content)] border border-[var(--border)] space-y-3">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="w-5 h-5 rounded-full bg-purple-500/20 text-purple-600 dark:text-purple-400 flex items-center justify-center text-xs font-bold">3</span>
+            <h2 class="text-xs sm:text-sm font-bold text-[var(--foreground)]">Dataform Core v3 Incremental Engine</h2>
+          </div>
+          <span class="text-[10px] font-mono text-[var(--muted-foreground)]">BigQuery Silver 1</span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+          <div class="p-3 rounded-lg bg-[var(--card)] border border-[var(--border)] space-y-1">
+            <span class="text-[10px] uppercase text-[var(--muted-foreground)] font-semibold">Late-Arrival Protection</span>
+            <p class="font-mono text-purple-500 font-bold">2-Hour Lookback Buffer</p>
+            <p class="text-[11px] text-[var(--muted-foreground)]">Captures transactions lagging due to network/commit delay</p>
+          </div>
+          <div class="p-3 rounded-lg bg-[var(--card)] border border-[var(--border)] space-y-1">
+            <span class="text-[10px] uppercase text-[var(--muted-foreground)] font-semibold">Transformation Type</span>
+            <p class="font-mono text-emerald-500 font-medium">Atomic MERGE</p>
+            <p class="text-[11px] text-[var(--muted-foreground)]">Uses <code>uniqueKey: ["header_id"]</code> to upsert in place</p>
+          </div>
+          <div class="p-3 rounded-lg bg-[var(--card)] border border-[var(--border)] space-y-1">
+            <span class="text-[10px] uppercase text-[var(--muted-foreground)] font-semibold">Automated Gatekeeper</span>
+            <p class="font-mono text-teal-500 font-medium">7 Built-in Assertions</p>
+            <p class="text-[11px] text-[var(--muted-foreground)]">Blocks commit if foreign key or uniqueness checks fail</p>
+          </div>
+        </div>
+
+        <!-- Code Contract Snippet -->
+        <div class="bg-[var(--card)] p-3 rounded-lg border border-[var(--border)] text-[11px] font-mono text-[var(--foreground)] overflow-x-auto">
+          <span class="text-[var(--muted-foreground)]">-- Dataform incremental MERGE contract with 2-hour lookback buffer:</span><br>
+          ${when(incremental(), `<span class="text-blue-500">WHERE LAST_UPDATE_DATE >= (SELECT TIMESTAMP_SUB(IFNULL(MAX(last_update_date), TIMESTAMP('1970-01-01')), INTERVAL 2 HOUR) FROM ${self()})</span>`)}<br>
+          QUALIFY ROW_NUMBER() OVER (PARTITION BY HEADER_ID ORDER BY LAST_UPDATE_DATE DESC) = 1
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+</body>
+</html>

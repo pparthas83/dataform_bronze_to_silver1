@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Structural Architecture: Oracle GoldenGate to BQ Silver 1</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+</head>
+<body class="bg-transparent text-[var(--foreground)] antialiased p-4 sm:p-6 font-sans">
+  <div class="max-w-5xl mx-auto bg-[var(--card)] border border-[var(--border)] rounded-2xl p-6 sm:p-8 shadow-sm space-y-8">
+
+    <!-- Header -->
+    <div class="border-b border-[var(--border)] pb-4 flex items-center justify-between">
+      <div>
+        <div class="flex items-center gap-2">
+          <span class="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-blue-500/10 text-blue-500 font-bold text-sm">📐</span>
+          <h1 class="text-lg sm:text-xl font-bold tracking-tight text-[var(--foreground)]">Structural Architecture: Hourly Pipeline</h1>
+        </div>
+        <p class="text-xs sm:text-sm text-[var(--muted-foreground)] mt-1">
+          Oracle GoldenGate Real-Time CDC ➔ BigQuery Bronze ➔ Airflow (Hourly) ➔ Dataform ➔ Silver 1
+        </p>
+      </div>
+      <span class="text-[10px] uppercase tracking-wider font-semibold px-2.5 py-1 rounded bg-blue-500/10 text-blue-600 border border-blue-500/20">
+        Structural View
+      </span>
+    </div>
+
+    <!-- Main Topology Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+
+      <!-- Boundary 1: External Source -->
+      <div class="lg:col-span-3 bg-[var(--content)] border border-[var(--border)] rounded-2xl p-4 flex flex-col justify-between">
+        <div>
+          <span class="text-[10px] uppercase tracking-wider font-bold text-orange-600 dark:text-orange-400">
+            Source Tier (Real-Time)
+          </span>
+          <h2 class="text-sm font-bold text-[var(--foreground)] mt-1">Oracle EBS / GoldenGate</h2>
+          <p class="text-xs text-[var(--muted-foreground)] mt-1 leading-relaxed">
+            Continuous CDC stream replicating changes independently of Airflow.
+          </p>
+
+          <div class="mt-6 p-4 rounded-xl bg-[var(--card)] border border-[var(--border)] space-y-2">
+            <div class="flex items-center gap-2">
+              <span class="text-base">⚡</span>
+              <h3 class="font-bold text-xs text-[var(--foreground)]">Oracle GoldenGate</h3>
+            </div>
+            <p class="text-[11px] text-[var(--muted-foreground)]">
+              Streams raw CDC inserts, updates, and deletes directly into BigQuery Bronze.
+            </p>
+          </div>
+        </div>
+
+        <div class="mt-6 pt-3 border-t border-[var(--border)] text-[10px] text-[var(--muted-foreground)]">
+          Boundary: Enterprise CDC Stream
+        </div>
+      </div>
+
+      <!-- Arrow 1 -->
+      <div class="hidden lg:flex items-center justify-center -mx-4 z-10 text-orange-500 font-bold text-sm">
+        ➔
+      </div>
+
+      <!-- Boundary 2: GCP BigQuery Storage Tier -->
+      <div class="lg:col-span-4 bg-[var(--content)] border border-[var(--border)] rounded-2xl p-4 flex flex-col justify-between space-y-4">
+        <div>
+          <span class="text-[10px] uppercase tracking-wider font-bold text-amber-600 dark:text-amber-400">
+            Storage Tier
+          </span>
+          <h2 class="text-sm font-bold text-[var(--foreground)] mt-1">BigQuery Medallion Tables</h2>
+          <p class="text-xs text-[var(--muted-foreground)] mt-1 leading-relaxed">
+            Serverless cloud analytical storage in Google Cloud.
+          </p>
+
+          <!-- Bronze Table -->
+          <div class="mt-4 p-3.5 rounded-xl bg-[var(--card)] border border-[var(--border)] space-y-1.5">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-[var(--foreground)] flex items-center gap-1.5">
+                <span>🥉</span> Bronze Table
+              </span>
+              <span class="text-[10px] text-[var(--muted-foreground)] font-mono">oracle_ebs_bronze</span>
+            </div>
+            <p class="text-[11px] text-[var(--muted-foreground)]">
+              Raw append-only CDC log (OE_ORDER_HEADERS_ALL).
+            </p>
+          </div>
+
+          <!-- Silver 1 Table -->
+          <div class="mt-3 p-3.5 rounded-xl bg-[var(--card)] border border-[var(--border)] space-y-1.5">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-[var(--foreground)] flex items-center gap-1.5">
+                <span>🥈</span> Silver 1 Table
+              </span>
+              <span class="text-[10px] text-[var(--muted-foreground)] font-mono">oracle_ebs_silver1</span>
+            </div>
+            <p class="text-[11px] text-[var(--muted-foreground)]">
+              Deduplicated incremental state (stg_ebs_oe_order_headers).
+            </p>
+          </div>
+        </div>
+
+        <div class="pt-3 border-t border-[var(--border)] text-[10px] text-[var(--muted-foreground)]">
+          Boundary: Google Cloud BigQuery
+        </div>
+      </div>
+
+      <!-- Arrow 2 -->
+      <div class="hidden lg:flex items-center justify-center -mx-4 z-10 text-blue-500 font-bold text-sm">
+        ↔
+      </div>
+
+      <!-- Boundary 3: GCP Cloud Composer / Dataform -->
+      <div class="lg:col-span-4 bg-[var(--content)] border border-[var(--border)] rounded-2xl p-4 flex flex-col justify-between space-y-4">
+        <div>
+          <span class="text-[10px] uppercase tracking-wider font-bold text-blue-600 dark:text-blue-400">
+            Orchestration &amp; Transformation
+          </span>
+          <h2 class="text-sm font-bold text-[var(--foreground)] mt-1">Airflow &amp; Dataform Core v3</h2>
+          <p class="text-xs text-[var(--muted-foreground)] mt-1 leading-relaxed">
+            Scheduled hourly batch orchestration &amp; SQLX execution.
+          </p>
+
+          <!-- Airflow Hourly DAG -->
+          <div class="mt-4 p-3 rounded-xl bg-[var(--card)] border border-[var(--border)] space-y-1">
+            <div class="flex items-center justify-between">
+              <h3 class="text-xs font-bold text-blue-600 dark:text-blue-400">Cloud Composer (Airflow)</h3>
+              <span class="text-[10px] font-mono text-[var(--muted-foreground)]">0 * * * *</span>
+            </div>
+            <p class="text-[11px] text-[var(--muted-foreground)]">
+              Single DAG: Compiles Git repository and invokes Dataform workflow every hour.
+            </p>
+          </div>
+
+          <!-- Dataform Engine -->
+          <div class="mt-2 p-3 rounded-xl bg-[var(--card)] border border-[var(--border)] space-y-1">
+            <div class="flex items-center justify-between">
+              <h3 class="text-xs font-bold text-emerald-600 dark:text-emerald-400">Dataform Execution</h3>
+              <span class="text-[10px] text-[var(--muted-foreground)]">BigQuery Engine</span>
+            </div>
+            <p class="text-[11px] text-[var(--muted-foreground)]">
+              Scans delta with 2-hr lookback buffer, merges into Silver 1 &amp; checks 7 assertions.
+            </p>
+          </div>
+        </div>
+
+        <div class="pt-3 border-t border-[var(--border)] text-[10px] text-[var(--muted-foreground)]">
+          Boundary: Cloud Composer &amp; Dataform API
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Dataflow Summary Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-2">
+      <div class="p-3 rounded-xl bg-[var(--content)] border border-[var(--border)] space-y-1">
+        <span class="text-[10px] font-bold text-orange-500 uppercase">1. Continuous Stream</span>
+        <p class="text-xs text-[var(--foreground)] font-medium">GoldenGate ➔ Bronze</p>
+        <p class="text-[11px] text-[var(--muted-foreground)]">Real-time append-only transactions continuously written.</p>
+      </div>
+
+      <div class="p-3 rounded-xl bg-[var(--content)] border border-[var(--border)] space-y-1">
+        <span class="text-[10px] font-bold text-blue-500 uppercase">2. Hourly Trigger</span>
+        <p class="text-xs text-[var(--foreground)] font-medium">Airflow Scheduler</p>
+        <p class="text-[11px] text-[var(--muted-foreground)]">Runs at minute 00 with max_active_runs=1 protection.</p>
+      </div>
+
+      <div class="p-3 rounded-xl bg-[var(--content)] border border-[var(--border)] space-y-1">
+        <span class="text-[10px] font-bold text-purple-500 uppercase">3. Dataform Invocation</span>
+        <p class="text-xs text-[var(--foreground)] font-medium">Composer ➔ Dataform API</p>
+        <p class="text-[11px] text-[var(--muted-foreground)]">Compiles main branch and triggers workflow execution.</p>
+      </div>
+
+      <div class="p-3 rounded-xl bg-[var(--content)] border border-[var(--border)] space-y-1">
+        <span class="text-[10px] font-bold text-emerald-500 uppercase">4. Incremental MERGE</span>
+        <p class="text-xs text-[var(--foreground)] font-medium">Dataform ➔ Silver 1</p>
+        <p class="text-[11px] text-[var(--muted-foreground)]">Scans 2-hr lookback buffer, dedupes, and updates Silver 1.</p>
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>
