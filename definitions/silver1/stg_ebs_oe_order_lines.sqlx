@@ -28,7 +28,8 @@ config {
     ordered_date: "Order placement timestamp",
     flow_status_code: "Line Status (e.g. AWAITING_SHIPPING, SHIPPED, CLOSED)",
     creation_date: "Record creation timestamp in EBS",
-    last_update_date: "Last update timestamp in EBS",
+    last_update_date: "Last update timestamp in EBS (used for deduplication / latest truth)",
+    bq_created_timestamp: "BigQuery Bronze arrival timestamp (used as incremental watermark)",
     silver1_ingestion_timestamp: "Timestamp when record was materialized into Silver 1"
   }
 }
@@ -49,16 +50,17 @@ WITH raw_lines AS (
     CAST(FLOW_STATUS_CODE AS STRING) AS flow_status_code,
     CAST(CREATION_DATE AS TIMESTAMP) AS creation_date,
     CAST(LAST_UPDATE_DATE AS TIMESTAMP) AS last_update_date,
+    CAST(BQ_CREATED_TIMESTAMP AS TIMESTAMP) AS bq_created_timestamp,
     CAST(_FIVETRAN_DELETED AS BOOL) AS is_deleted,
-    CAST(_FIVETRAN_SYNCED AS TIMESTAMP) AS cdc_synced_at,
+    -- Deduplication: Order by business timestamp (LAST_UPDATE_DATE) to capture latest business truth
     ROW_NUMBER() OVER (
       PARTITION BY LINE_ID 
-      ORDER BY LAST_UPDATE_DATE DESC, _FIVETRAN_SYNCED DESC
+      ORDER BY LAST_UPDATE_DATE DESC, BQ_CREATED_TIMESTAMP DESC
     ) AS row_num
   FROM
     ${ref("OE_ORDER_LINES_ALL")}
-  -- Incremental filter with 2-hour safety lookback to capture late-arriving CDC records:
-  ${when(incremental(), `WHERE LAST_UPDATE_DATE >= (SELECT TIMESTAMP_SUB(IFNULL(MAX(last_update_date), TIMESTAMP('1970-01-01')), INTERVAL 2 HOUR) FROM ${self()})`)}
+  -- Incremental Watermark: Filter on BQ_CREATED_TIMESTAMP to only read newly arrived Bronze data
+  ${when(incremental(), `WHERE BQ_CREATED_TIMESTAMP >= (SELECT TIMESTAMP_SUB(IFNULL(MAX(bq_created_timestamp), TIMESTAMP('1970-01-01')), INTERVAL 5 MINUTE) FROM ${self()})`)}
 )
 
 SELECT
@@ -77,6 +79,7 @@ SELECT
   flow_status_code,
   creation_date,
   last_update_date,
+  bq_created_timestamp,
   CURRENT_TIMESTAMP() AS silver1_ingestion_timestamp
 FROM
   raw_lines

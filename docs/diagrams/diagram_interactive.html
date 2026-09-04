@@ -26,15 +26,16 @@
           <h1 class="text-lg sm:text-xl font-bold tracking-tight text-[var(--foreground)]">Interactive Pipeline Simulator</h1>
         </div>
         <p class="text-xs sm:text-sm text-[var(--muted-foreground)] mt-0.5">
-          Simulate hourly batch execution: GoldenGate ➔ Bronze ➔ Airflow ➔ Dataform ➔ Silver 1
+          Simulate execution: GoldenGate ➔ BQ_CREATED_TIMESTAMP Watermark ➔ Airflow ➔ Dataform ➔ Silver 1
         </p>
       </div>
 
       <!-- Controls -->
       <div class="flex items-center gap-2">
         <select id="scenarioSelect" onchange="resetSim()" class="bg-[var(--content)] border border-[var(--border)] text-xs rounded-lg px-2.5 py-1.5 text-[var(--foreground)] font-medium">
-          <option value="happy">Scenario 1: Hourly Incremental Sync (Success)</option>
-          <option value="fail">Scenario 2: Referential Assertion Failure</option>
+          <option value="happy">Scenario 1: Hourly Incremental Sync (BQ_CREATED_TIMESTAMP Watermark)</option>
+          <option value="catchup">Scenario 2: 6-Hour GoldenGate Catch-Up (100% Ingested)</option>
+          <option value="fail">Scenario 3: Referential Assertion Failure</option>
         </select>
         <button id="nextBtn" onclick="stepForward()" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white shadow-xs transition-colors">
           Next Step ➔
@@ -66,7 +67,7 @@
           <span class="text-xs">⚡</span>
         </div>
         <h3 class="font-bold text-xs text-[var(--foreground)]">GoldenGate</h3>
-        <p class="text-[10px] text-[var(--muted-foreground)]">Streams real-time append CDC to Bronze.</p>
+        <p class="text-[10px] text-[var(--muted-foreground)]">Appends CDC stamped with BQ_CREATED_TIMESTAMP.</p>
       </div>
 
       <!-- Stage 2 -->
@@ -92,11 +93,11 @@
       <!-- Stage 4 -->
       <div id="card-4" class="step-card p-3 rounded-xl bg-[var(--content)] border border-[var(--border)] space-y-1.5">
         <div class="flex items-center justify-between">
-          <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600">Stage 4</span>
+          <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600">Stage 4</span>
           <span class="text-xs">⚙️</span>
         </div>
-        <h3 class="font-bold text-xs text-[var(--foreground)]">Lookback MERGE</h3>
-        <p class="text-[10px] text-[var(--muted-foreground)]">Scans 2-hr lookback buffer &amp; dedupes to Silver 1.</p>
+        <h3 class="font-bold text-xs text-[var(--foreground)]">Dual Watermark</h3>
+        <p class="text-[10px] text-[var(--muted-foreground)]">Filters arrival timestamp, dedupes by LAST_UPDATE_DATE.</p>
       </div>
 
       <!-- Stage 5 -->
@@ -128,11 +129,18 @@
     let currentStep = 0;
     const scenarios = {
       happy: [
-        { card: 1, text: "GoldenGate replicates 1,840 CDC changes into oracle_ebs_bronze tables in real time.", log: "[GOLDENGATE] Streaming append batch completed: OE_ORDER_HEADERS_ALL (310 rows), OE_ORDER_LINES_ALL (1,530 rows)." },
+        { card: 1, text: "GoldenGate replicates 1,840 CDC changes into Bronze. BigQuery stamps BQ_CREATED_TIMESTAMP = 2026-09-04 15:58:12 UTC.", log: "[GOLDENGATE] Real-time append batch: 1,840 rows inserted. BQ_CREATED_TIMESTAMP stamped on partition 2026-09-04." },
         { card: 2, text: "Airflow scheduler reaches minute 00 and launches ebs_bronze_to_silver1_pipeline.", log: "[AIRFLOW] Schedule cron triggered (0 * * * *). Active runs: 1 / 1. Starting create_compilation_result task." },
         { card: 3, text: "Dataform API compiles git commitish 'main'. 13 actions validated.", log: "[DATAFORM API] POST /v1beta1/projects/.../compilationResults -> 13 actions compiled, 0 errors. Creating workflow invocation." },
-        { card: 4, text: "Dataform executes atomic BigQuery MERGE with 2-hour safety lookback buffer.", log: "[BIGQUERY] MERGE oracle_ebs_silver1.stg_ebs_oe_order_headers USING delta WHERE LAST_UPDATE_DATE >= TIMESTAMP_SUB(MAX, 2 HOUR)... 310 orders upserted." },
+        { card: 4, text: "BigQuery executes incremental MERGE using BQ_CREATED_TIMESTAMP watermark & LAST_UPDATE_DATE deduplication.", log: "[BIGQUERY] Watermark filter: BQ_CREATED_TIMESTAMP >= '2026-09-04 14:55:00 UTC'. Partition pruning scanned 1 partition (4.2 MB). 1,840 rows deduplicated to 1,510 latest records." },
         { card: 5, text: "All 7 automated Data Quality assertions PASS. Silver 1 tables cleanly committed.", log: "[ASSERTIONS] Foreign key referential check: PASS. Unique key check: PASS. Nullability check: PASS. DAG execution SUCCESS." }
+      ],
+      catchup: [
+        { card: 1, text: "GoldenGate resumes after 6-hour network cut. Replays 45,000 delayed records into Bronze. All stamped with BQ_CREATED_TIMESTAMP = NOW.", log: "[CATCH-UP] 45,000 backlog records landed in Bronze. BQ_CREATED_TIMESTAMP = 2026-09-04 15:59:00 UTC, despite old ERP dates (09:00 AM)." },
+        { card: 2, text: "Airflow hourly scheduler triggers Dataform execution.", log: "[AIRFLOW] Hourly DAG triggered on schedule. Concurrency guard verified." },
+        { card: 3, text: "Dataform repository compiles successfully.", log: "[DATAFORM] Compilation successful. Invocation started in BigQuery." },
+        { card: 4, text: "Watermark check captures ALL 45,000 delayed rows because arrival time is NOW! Zero data loss.", log: "[BIGQUERY] Watermark BQ_CREATED_TIMESTAMP >= last_run captured all 45,000 backlog rows! No lookback window truncation occurred. Deduplicating by LAST_UPDATE_DATE..." },
+        { card: 5, text: "Atomic MERGE completes; 7 assertions validate complete data integrity.", log: "[ASSERTIONS] Backlog safely merged. All 7 assertions PASS. 0 orphan records. Catch-up recovered successfully!" }
       ],
       fail: [
         { card: 1, text: "GoldenGate streams order lines where parent headers were delayed in Oracle EBS commit.", log: "[GOLDENGATE] Real-time stream synced order lines, but corresponding headers are still uncommitted in EBS." },

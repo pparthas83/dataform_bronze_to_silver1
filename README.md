@@ -4,7 +4,7 @@ This repository contains a production-grade **Google Cloud Dataform (Core v3+)**
 
 ---
 
-## Architecture Overview
+## Architecture Overview (Dual-Timestamp Pattern)
 
 ```
 ┌──────────────────────────────────────┐     ┌────────────────────────────────────────────────────────┐
@@ -17,9 +17,11 @@ This repository contains a production-grade **Google Cloud Dataform (Core v3+)**
 │           │                          │     │                 │                                      │
 │           ▼ (Append-only CDC)        │     │                 ▼                                      │
 │  [BigQuery Bronze Tables] ───────────┼─────┼────────> [Dataform Core v3]                            │
-│    - OE_ORDER_HEADERS_ALL            │     │            - 2-Hour Safety Lookback Buffer             │
-│    - OE_ORDER_LINES_ALL              │     │            - Intra-Hour Row Deduplication              │
-│    - HZ_CUST_ACCOUNTS                │     │            - Atomic BigQuery MERGE                     │
+│    - OE_ORDER_HEADERS_ALL            │     │            - Ingestion Watermark:                      │
+│    - OE_ORDER_LINES_ALL              │     │                BQ_CREATED_TIMESTAMP >= MAX - 5 MIN    │
+│    - HZ_CUST_ACCOUNTS                │     │            - Business Deduplication:                   │
+│    * Stamped with:                   │     │                ROW_NUMBER() OVER LAST_UPDATE_DATE DESC │
+│      BQ_CREATED_TIMESTAMP            │     │            - Atomic BigQuery MERGE                     │
 │                                      │     │                 │                                      │
 │                                      │     │                 ▼                                      │
 │                                      │     │          [BigQuery Silver 1 Tables]                    │
@@ -32,7 +34,7 @@ This repository contains a production-grade **Google Cloud Dataform (Core v3+)**
 └──────────────────────────────────────┘     └────────────────────────────────────────────────────────┘
 ```
 
-### Architecture Diagram
+### High-Resolution Architecture Diagram
 
 ![Architecture Diagram](docs/diagrams/pipeline_architecture.png)
 
@@ -42,9 +44,9 @@ The repository includes 3 specialized HTML Generative UI diagrams located in [`d
 
 | Diagram | File Link | Focus & Audience |
 | :--- | :--- | :--- |
-| **📐 Structural View** | [`docs/diagrams/diagram_structural.html`](docs/diagrams/diagram_structural.html) | High-level system topology, boundaries, and clean directional dataflow. |
-| **⚙️ Operational View** | [`docs/diagrams/diagram_operational.html`](docs/diagrams/diagram_operational.html) | Technical contracts, BigQuery zero-cost API specs, 2-hr lookback buffer, and Airflow concurrency guards. |
-| **🎮 Interactive Simulator** | [`docs/diagrams/diagram_interactive.html`](docs/diagrams/diagram_interactive.html) | Step-by-step playback simulator testing normal incremental syncs and referential assertion failures. |
+| **📐 Structural View** | [`docs/diagrams/diagram_structural.html`](docs/diagrams/diagram_structural.html) | High-level system topology, enterprise boundaries, and clean directional dataflow. |
+| **⚙️ Operational View** | [`docs/diagrams/diagram_operational.html`](docs/diagrams/diagram_operational.html) | Technical contracts, BigQuery partition pruning specs, BQ_CREATED_TIMESTAMP watermark logic, and Airflow concurrency guards. |
+| **🎮 Interactive Simulator** | [`docs/diagrams/diagram_interactive.html`](docs/diagrams/diagram_interactive.html) | Step-by-step playback simulator testing normal incremental syncs, 6-hour backlog recovery, and referential assertion failures. |
 
 ---
 
@@ -77,7 +79,7 @@ sequenceDiagram
     participant Alert as Alert System (Slack/Email)
 
     Note over OGG,BQ_Bronze: Continuous Real-Time Streaming
-    OGG->>BQ_Bronze: Streams real-time append CDC records
+    OGG->>BQ_Bronze: Streams real-time append CDC records stamped with BQ_CREATED_TIMESTAMP
 
     Note over Airflow: Hourly Scheduled Batch (0 * * * *)
     Airflow->>Airflow: Timer triggers hourly run (max_active_runs=1)
@@ -85,8 +87,8 @@ sequenceDiagram
     DF_API-->>Airflow: Compilation Success (13 actions, 0 graph errors)
     Airflow->>DF_API: 2. DataformCreateWorkflowInvocationOperator
     DF_API->>BigQuery: Trigger workflow invocation
-    BigQuery->>BQ_Bronze: 3. Scan incremental delta with 2-Hour Lookback Buffer
-    BigQuery->>BigQuery: 4. Intra-hour deduplication (ROW_NUMBER = 1)
+    BigQuery->>BQ_Bronze: 3. Scans arrival delta: BQ_CREATED_TIMESTAMP >= MAX(bq_created_timestamp) - 5 MIN
+    BigQuery->>BigQuery: 4. Deduplicates row versions: ROW_NUMBER() OVER LAST_UPDATE_DATE DESC
     BigQuery->>BQ_Silver: 5. Atomic MERGE (uniqueKey upsert)
     BigQuery->>Assert: 6. Execute 7 Data Quality & Referential Assertions
     Assert-->>BigQuery: All assertions PASS
@@ -99,40 +101,63 @@ sequenceDiagram
     end
 ```
 
-### Step 1: Continuous GoldenGate Streaming (Bronze Layer)
-- Oracle GoldenGate captures Change Data Capture (CDC) events directly from Oracle EBS Order Management (`OE_ORDER_HEADERS_ALL`, `OE_ORDER_LINES_ALL`, `HZ_CUST_ACCOUNTS`).
-- It streams records into BigQuery Bronze tables in **append-only mode**, capturing transaction timestamps (`LAST_UPDATE_DATE`) and CDC metadata without expensive continuous merges.
+### The Dual-Timestamp Pattern Explained
 
-### Step 2: Hourly Airflow Orchestration (Cloud Composer)
-- The Airflow DAG (`dags/ebs_bronze_to_silver1_pipeline.py`) executes on a fixed hourly schedule (`schedule_interval="0 * * * *"`).
-- **Concurrency Guard**: Configured with `max_active_runs=1` to guarantee subsequent hourly runs never collide if a peak execution takes longer than expected.
-- **Pure Orchestration**: Airflow coordinates execution strictly via 2 declarative tasks:
+The pipeline separates **arrival tracking** from **business state deduplication**:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      THE DUAL-TIMESTAMP PATTERN                             │
+│                                                                             │
+│  1. Ingestion Watermark (BQ_CREATED_TIMESTAMP):                             │
+│     Answers: "What newly arrived rows did GoldenGate drop off since last run?"│
+│                                                                             │
+│  2. Business Deduplication (LAST_UPDATE_DATE / OGG_OP_TS):                  │
+│     Answers: "Among these newly arrived rows, which is the latest truth?"   │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Step 1: Continuous GoldenGate Streaming (Bronze Layer)
+- Oracle GoldenGate streams CDC events from Oracle EBS into BigQuery Bronze tables (`OE_ORDER_HEADERS_ALL`, `OE_ORDER_LINES_ALL`, `HZ_CUST_ACCOUNTS`).
+- Every inserted row is stamped with `BQ_CREATED_TIMESTAMP` by BigQuery upon physical arrival.
+- Writes operate in **append-only mode**, avoiding expensive streaming row-level updates in Bronze.
+
+#### Step 2: Hourly Airflow Orchestration (Cloud Composer)
+- The Airflow DAG (`dags/ebs_bronze_to_silver1_pipeline.py`) runs every hour at minute 00 (`schedule_interval="0 * * * *"`).
+- **Concurrency Guard**: Protected with `max_active_runs=1` so runs never overlap during heavy catch-up periods.
+- **Pure Orchestration**: Executes strictly 2 tasks:
   1. `DataformCreateCompilationResultOperator`
   2. `DataformCreateWorkflowInvocationOperator`
 
-### Step 3: Dataform Repository Compilation
+#### Step 3: Dataform Repository Compilation
 - Airflow calls the Dataform API to compile the repository code from the `main` Git branch.
-- Dataform validates all `.sqlx` definitions and `workflow_settings.yaml`, building a complete dependency execution graph with zero compilation errors.
+- Validates all `.sqlx` definitions and `workflow_settings.yaml`, building a complete dependency execution graph with zero compilation errors.
 
-### Step 4: Incremental MERGE Execution with 2-Hour Lookback Buffer
+#### Step 4: Incremental MERGE Execution with BQ_CREATED_TIMESTAMP Watermark
 - BigQuery executes the compiled incremental SQLX transformations in dependency order:
-  1. **2-Hour Safety Lookback Buffer**:
+  1. **Foolproof Arrival Watermark**:
      ```sql
-     ${when(incremental(), `WHERE LAST_UPDATE_DATE >= (SELECT TIMESTAMP_SUB(IFNULL(MAX(last_update_date), TIMESTAMP('1970-01-01')), INTERVAL 2 HOUR) FROM ${self()})`)}
+     ${when(incremental(), `WHERE BQ_CREATED_TIMESTAMP >= (SELECT TIMESTAMP_SUB(IFNULL(MAX(bq_created_timestamp), TIMESTAMP('1970-01-01')), INTERVAL 5 MINUTE) FROM ${self()})`)}
      ```
-     *Guarantees zero missed records from late-arriving transactions or commit lag from Oracle EBS.*
-  2. **Intra-Hour Deduplication**:
-     Uses `ROW_NUMBER() OVER (PARTITION BY primary_key ORDER BY LAST_UPDATE_DATE DESC, cdc_synced_at DESC)` to select only the latest state (`row_num = 1`).
+     *Because this filters on ingestion time, extended GoldenGate outages (even multi-day lags) are 100% recovered on the next run without data loss. Furthermore, BigQuery prunes partitions to scan only today's arrival partition.*
+  2. **Business State Deduplication**:
+     ```sql
+     QUALIFY ROW_NUMBER() OVER (
+       PARTITION BY HEADER_ID 
+       ORDER BY LAST_UPDATE_DATE DESC, BQ_CREATED_TIMESTAMP DESC
+     ) = 1
+     ```
+     *Guarantees the true latest version in Oracle EBS wins, regardless of arrival order.*
   3. **Atomic BigQuery MERGE**:
-     BigQuery merges delta rows into Silver 1 (`uniqueKey: ["header_id"]`), updating modified orders in place and inserting new ones.
+     BigQuery merges delta rows into Silver 1 (`uniqueKey: ["header_id"]`), updating existing records and inserting new ones.
 
-### Step 5: Automated Data Quality Assertions
+#### Step 5: Automated Data Quality Assertions
 Immediately after table materializations finish, Dataform executes **7 automated assertions** against the target tables in schema `oracle_ebs_assertions`:
 - **Primary Key Uniqueness**: Verifies no duplicate `header_id`, `line_id`, or `cust_account_id` entries exist.
 - **Non-Null Constraints**: Validates that critical business fields (`header_id`, `line_id`, `cust_account_id`, `ordered_quantity`) are non-null.
 - **Referential Integrity Check** (`assert_order_lines_header_fk`): Custom SQL assertion verifying every order line references a valid header in `stg_ebs_oe_order_headers`.
 
-### Step 6: Status Monitoring & Alerting
+#### Step 6: Status Monitoring & Alerting
 - Cloud Composer monitors execution until completion.
 - If any query fails or any assertion detects invalid rows, the commit is halted and Airflow triggers an immediate alert (Slack/Email) with execution details.
 
@@ -150,7 +175,7 @@ Immediately after table materializations finish, Dataform executes **7 automated
 │   │   ├── src_oe_order_headers_all.sqlx
 │   │   ├── src_oe_order_lines_all.sqlx
 │   │   └── src_hz_cust_accounts.sqlx
-│   ├── silver1/                        # Silver 1 incremental transformations (with 2-hr lookback)
+│   ├── silver1/                        # Silver 1 incremental transformations (Dual-Timestamp)
 │   │   ├── stg_ebs_oe_order_headers.sqlx
 │   │   ├── stg_ebs_oe_order_lines.sqlx
 │   │   └── stg_ebs_hz_cust_accounts.sqlx
@@ -166,11 +191,11 @@ Immediately after table materializations finish, Dataform executes **7 automated
 │   └── diagrams/                       # Checked-in architecture diagrams
 │       ├── pipeline_architecture.png   # PNG diagram
 │       ├── diagram_structural.html     # High-level structural architecture
-│       ├── diagram_operational.html    # Operational specs & lookback contracts
+│       ├── diagram_operational.html    # Operational specs & dual-timestamp contracts
 │       └── diagram_interactive.html    # Step-by-step interactive simulator
 └── scripts/                            # Helper & test scripts
     ├── generate_architecture_diagram.py # Python diagrams generation script
-    └── seed_bronze_tables.sql          # Test seed data for local validation
+    └── seed_bronze_tables.sql          # Test seed data with BQ_CREATED_TIMESTAMP
 ```
 
 ---
@@ -203,7 +228,7 @@ The pipeline includes **3 pre-built BigQuery Views** in `oracle_ebs_silver1` tha
 | :--- | :---: | :--- | :--- |
 | **Pipeline Hard Failure** | SEV-1 🔴 | Airflow DAG status = `FAILED` after 1 retry | Slack `#data-pipeline-alerts` |
 | **Assertion Failure** | SEV-1 🔴 | `vw_obs_assertion_health.failing_row_count > 0` | Slack `#data-pipeline-alerts` |
-| **Lookback Lag Delay** | SEV-2 🟡 | Airflow DAG run exceeds 45 mins | Slack `#data-pipeline-alerts` |
+| **Ingestion Stagnation** | SEV-2 🟡 | Airflow DAG run exceeds 45 mins | Slack `#data-pipeline-alerts` |
 
 ---
 
